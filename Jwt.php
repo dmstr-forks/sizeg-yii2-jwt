@@ -4,12 +4,16 @@ namespace sizeg\jwt;
 
 use Lcobucci\JWT\Builder;
 use Lcobucci\JWT\Claim\Factory as ClaimFactory;
+use Lcobucci\JWT\Configuration;
 use Lcobucci\JWT\Parser;
 use Lcobucci\JWT\Parsing\Decoder;
 use Lcobucci\JWT\Parsing\Encoder;
 use Lcobucci\JWT\Signer;
 use Lcobucci\JWT\Signer\Key;
 use Lcobucci\JWT\Token;
+use Lcobucci\JWT\Validation\Constraint\IdentifiedBy;
+use Lcobucci\JWT\Validation\Constraint\IssuedBy;
+use Lcobucci\JWT\Validation\Constraint\PermittedFor;
 use Lcobucci\JWT\ValidationData;
 use Yii;
 use yii\base\Component;
@@ -57,9 +61,10 @@ class Jwt extends Component
      * @param ClaimFactory|null $claimFactory
      * @return Builder
      */
-    public function getBuilder(Encoder $encoder = null, ClaimFactory $claimFactory = null)
+    public function getBuilder()
     {
-        return new Builder($encoder, $claimFactory);
+        $config = $this->_getConfig();
+        return $config->builder();
     }
 
     /**
@@ -68,9 +73,10 @@ class Jwt extends Component
      * @param ClaimFactory|null $claimFactory
      * @return Parser
      */
-    public function getParser(Decoder $decoder = null, ClaimFactory $claimFactory = null)
+    public function getParser()
     {
-        return new Parser($decoder, $claimFactory);
+        $config = $this->_getConfig();
+        return $config->parser();
     }
 
     /**
@@ -148,11 +154,19 @@ class Jwt extends Component
      */
     public function validateToken(Token $token, $currentTime = null)
     {
-        $validationData = $this->getValidationData();
-        if ($currentTime !== null) {
-            $validationData->setCurrentTime($currentTime);
+        $config = $this->_getConfig();
+        $constraints = $config->validationConstraints();
+        if (! $config->validator()->validate($token, ...$constraints)) {
+            throw new RuntimeException('No way!');
         }
-        return $token->validate($validationData);
+
+        return true;
+
+        #$validationData = $this->getValidationData();
+        #if ($currentTime !== null) {
+        #    $validationData->setCurrentTime($currentTime);
+        #}
+        #return $token->validate($validationData);
     }
 
     /**
@@ -163,7 +177,8 @@ class Jwt extends Component
      */
     public function verifyToken(Token $token)
     {
-        $alg = $token->getHeader('alg');
+        $config = $this->_getConfig();
+        $alg = $token->headers()->get('alg');
 
         if (empty($this->supportedAlgs[$alg])) {
             throw new InvalidArgumentException('Algorithm not supported');
@@ -172,6 +187,28 @@ class Jwt extends Component
         /** @var Signer $signer */
         $signer = Yii::createObject($this->supportedAlgs[$alg]);
 
-        return $token->verify($signer, $this->key);
+        if (! $config->validator()->validate($token, ...$config->validationConstraints())) {
+            throw new InvalidArgumentException('Invalid token provided');
+        }
+        return true;
+
+        #return $token->verify($signer, $this->key);
+    }
+
+    private function _getConfig(){
+        /*
+        Signer $signer,
+        Key $signingKey,
+        Key $verificationKey,
+        ?Encoder $encoder = null,
+        ?Decoder $decoder = null
+         */
+        $config = Configuration::forAsymmetricSigner(
+            new Signer\Rsa\Sha256(),
+            Key\InMemory::file($this->key),
+            Key\InMemory::base64Encoded("")
+        );
+        $config->setValidationConstraints(new IssuedBy('idp.wildtierportal.de'));
+        return $config;
     }
 }
